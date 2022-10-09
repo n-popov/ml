@@ -15,7 +15,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # Константы
 INPUT_DIR = './inputs'
-BATCH_SIZE = 1
+BATCH_SIZE = 16
 
 
 # Класс преобразования
