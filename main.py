@@ -15,7 +15,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # Константы
 INPUT_DIR = './inputs'
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 
 
 # Класс преобразования
@@ -51,10 +51,11 @@ class LinearPredictor(Module):
 class LogisticPredictor(Module):
     def __init__(self):
         super(LogisticPredictor, self).__init__()
-        self.predictor = Linear(10, 1)
+        self.predictor = Linear(10, 5)
 
     def forward(self, x):
-        x = softmax(self.predictor(x))
+        x = self.predictor(x)
+        # Softmax зашито в функцию ошибок, будем использовать CrossEntropy
         return x
 
 
@@ -118,19 +119,28 @@ class ShanghaiDataset(Dataset):
 
 
 # Функция обучения
-def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device=device('cpu')):
+def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device=device('cpu'), task_num=0):
     for epoch in range(epochs):
+        # Для каждой единицы разбиения в случае тренировочной выборки
+        # используем optimizer, в случае валидационной просто считаем loss
         training_loss = 0.0
         valid_loss = 0.0
         model.train()
         for batch in train_loader:
             optimizer.zero_grad()
             inputs, targets = batch
-            # targets = targets.type(LongTensor)
+            # print('target:', targets)
+
+            # CrossEntropy кушает LongTensor,
+            # а для MSE нужно преобразовать (11) в (11, 1)
+            if task_num:
+                targets = targets.type(LongTensor)
+            else:
+                targets = targets.unsqueeze(1)
             inputs = inputs.to(device)
             targets = targets.to(device)
             output = model(inputs)
-            loss = loss_fn(output, targets.unsqueeze(1))
+            loss = loss_fn(output, targets)
             loss.backward()
             optimizer.step()
             training_loss += loss.data.item() * inputs.size(0)
@@ -141,12 +151,16 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
             inputs, targets = batch
             inputs = inputs.to(device)
             output = model(inputs)
-            # targets = targets.type(LongTensor)
+            if task_num:
+                targets = targets.type(LongTensor)
+            else:
+                targets = targets.unsqueeze(1)
             targets = targets.to(device)
-            loss = loss_fn(output, targets.unsqueeze(1))
+            loss = loss_fn(output, targets)
             valid_loss += loss.data.item() * inputs.size(0)
         valid_loss /= len(val_loader.dataset)
 
+        # На всякий случай сохраняем веса
         if not exists('./weights'):
             mkdir('./weights')
 
@@ -159,10 +173,12 @@ if __name__ == '__main__':
     dataset_filename = input('Input CSV filename: ')
     dataset_filepath = join(INPUT_DIR, dataset_filename)
 
+    # 0 -- 1-е задание, 1 -- 2-е.
     task_num = int(input('Choose task: 0 or 1: '))
 
     dataset = ShanghaiDataset(dataset_filepath, label=('cbwd' if task_num else 'PRES'))
 
+    # Делим на тренировочную и валидационную выборки
     validation_split = 0.15
     indices = list(range(len(dataset)))
     shuffle(indices)
@@ -177,11 +193,16 @@ if __name__ == '__main__':
     validation_loader = DataLoader(dataset, batch_size=BATCH_SIZE,
                                    sampler=valid_sampler)
 
+    # Выбираем нужную модель и функцию ошибок
     predictor = LogisticPredictor() if task_num else LinearPredictor()
     loss_function = CrossEntropyLoss() if task_num else MSELoss()
+    # Будем считать на видеокарте
     torch_device = device('cuda')
     predictor.to(device=torch_device)
+
+    # learning rate -- скорость спуска
+    # Адам -- всё равно лучше, чем руками подбирать
     optimizer = Adam(predictor.parameters(), lr=0.001)
     train(model=predictor, optimizer=optimizer, loss_fn=loss_function,
           train_loader=train_loader, val_loader=validation_loader,
-          epochs=30, device=torch_device)
+          epochs=30, device=torch_device, task_num=task_num)
