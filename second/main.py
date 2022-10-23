@@ -6,17 +6,18 @@ from random import shuffle
 from os.path import join, exists
 
 from pandas import read_csv
-from torch import tensor, save, device, LongTensor, clone
+from torch import tensor, save, device, clone, sigmoid
 
 from torch.optim import Adam
-from torch.nn import BCELoss, Module, Linear, ParameterDict
+from torch.nn import BCELoss, Module, Linear
 
 from torch.nn.functional import relu, sigmoid
 from torch.utils.data import Dataset, DataLoader
 
 # Константы
 INPUT_DIR = 'inputs'
-BATCH_SIZE = 1
+DEPTH = 2
+EPOCHS = 100
 
 
 # Вывод как в JavaScript
@@ -33,22 +34,20 @@ NAMES = ['Anton', 'Ivan', 'Boris', 'Marie', 'Rebecca', 'Pola', 'Yohanna', 'Sacha
 NAMES += ['Jim Hawkins', 'Captain Smollett', 'Billy Bones', 'Doctor Livesey',
           'Squire Trelawney', 'Captain Flint', 'Blind Pew', 'Benn Gunn']
 
-# The Expanse
-NAMES += ['Camina Drummer', 'Chrisjen Avasarala', 'Amos Burton', 'Bobbie Draper',
-          'Klaes Ashford', 'Alex Kamal', 'Josephus Miller', 'Elvi Okoye']
-
-
 # Модели
 class DecisionTree(Module):
     def __init__(self, depth, names):
         super(DecisionTree, self).__init__()
 
+        # Глубина дерева
         self.depth = depth
 
+        # Имена узлов
         self.names = deepcopy(names)
         shuffle(self.names)
         self.name_index = 0
 
+        # Строим дерево
         self.tree = Tree()
         self.tree.create_node('root', 'root', data=Linear(5, 1))
         self._build_branch(parent_node='root', branch_depth=self.depth - 1)
@@ -56,8 +55,12 @@ class DecisionTree(Module):
         self.tree.show()
 
         for node in self.tree.expand_tree(mode=Tree.DEPTH):
-            self.register_module(node, self.tree.get_node(node).data)
+            module = self.tree.get_node(node).data
+            for parameter in module.parameters():
+                self.register_parameter(node, parameter)
 
+
+    # Строим дерево рекурсивно
     def _build_branch(self, parent_node, branch_depth):
         if branch_depth == 0:
             return
@@ -69,6 +72,8 @@ class DecisionTree(Module):
         self.tree.create_node(right_node_name, right_node_name, parent=parent_node, data=Linear(5, 1))
         self._build_branch(parent_node=right_node_name, branch_depth=branch_depth - 1)
 
+
+    # Именуем узлы
     def get_name(self):
         if self.name_index == len(self.names):
             raise IndexError(f'Not enough names to build the tree with depth {self.depth}')
@@ -91,8 +96,6 @@ class DecisionTree(Module):
                 z = relu(module(indicator))
                 name = children[0] if list(z).count(0) >= len(z) // 2 else children[1]
             else:
-                # Как и в прошлой задачке, не используем softmax
-                # благодаря CrossEntropyLoss
                 x = sigmoid(module(x))
                 return x
 
@@ -105,22 +108,11 @@ class ODDataset(Dataset):
         # Читаем датасет
         dataset = read_csv(filepath)
 
-        # Очевидно, что год вообще не имеет значения, а отдельно месяц и день также неинтересны.
-        # Информация о сезоне уже содержится в месяце.
-
-        # Преобразуем год, месяц и день во временную метку,
-        # исключим год и отнормируем
-
-        # Выкидываем год, месяц, день и время года, а также номер
+        # Выкидываем id и дату
         dataset.drop(columns=['id', 'date'], inplace=True)
-
-        console.log(dataset.shape)
 
         # Выкидываем NaN-ы
         dataset.dropna(inplace=True)
-
-        # Кажется, готово
-        console.log(dataset.head())
 
         self._dataframe = dataset
 
@@ -138,7 +130,7 @@ class ODDataset(Dataset):
 
 
 # Функция обучения
-def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device=device('cuda')):
+def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device=device('cpu')):
     for epoch in range(epochs):
         # Для каждой единицы разбиения в случае тренировочной выборки
         # используем optimizer, в случае валидационной просто считаем loss
@@ -148,10 +140,8 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
         for batch in train_loader:
             optimizer.zero_grad()
             inputs, targets = batch
-
-            # CrossEntropy кушает LongTensor
-            targets = targets.unsqueeze(1)
             inputs = inputs.to(device)
+            targets = targets.unsqueeze(1)
             targets = targets.to(device)
             output = model(inputs)
             loss = loss_fn(output, targets)
@@ -165,8 +155,8 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
             inputs, targets = batch
             inputs = inputs.to(device)
             output = model(inputs)
-            targets = targets.unsqueeze(1)
             targets = targets.to(device)
+            targets = targets.unsqueeze(1)
             loss = loss_fn(output, targets)
             valid_loss += loss.data.item() * inputs.size(0)
         valid_loss /= len(val_loader.dataset)
@@ -191,19 +181,16 @@ if __name__ == '__main__':
 
     # Делим на тренировочную и валидационную выборки
 
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE)
-    validation_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
+    train_loader = DataLoader(train_dataset, 1)
+    validation_loader = DataLoader(val_dataset, 1)
 
     # Выбираем нужную модель и функцию ошибок
-    model = DecisionTree(depth=2, names=NAMES)
+    model = DecisionTree(depth=DEPTH, names=NAMES)
     loss_function = BCELoss()
-    # Будем считать на видеокарте
-    torch_device = device('cpu')
-    model.to(device=torch_device)
 
     # learning rate -- скорость спуска
     # Адам -- всё равно лучше, чем руками подбирать
     optimizer = Adam(model.parameters(), lr=0.001)
     train(model=model, optimizer=optimizer, loss_fn=loss_function,
           train_loader=train_loader, val_loader=validation_loader,
-          epochs=300, device=torch_device)
+          epochs=EPOCHS)
