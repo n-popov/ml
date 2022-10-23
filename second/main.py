@@ -6,17 +6,17 @@ from random import shuffle
 from os.path import join, exists
 
 from pandas import read_csv
-from torch import tensor, save, device, LongTensor
+from torch import tensor, save, device, LongTensor, clone
 
 from torch.optim import Adam
-from torch.nn import CrossEntropyLoss, Module, Linear, ParameterDict
+from torch.nn import BCELoss, Module, Linear, ParameterDict
 
-from torch.nn.functional import relu
+from torch.nn.functional import relu, sigmoid
 from torch.utils.data import Dataset, DataLoader
 
 # Константы
 INPUT_DIR = 'inputs'
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 
 
 # Вывод как в JavaScript
@@ -50,9 +50,9 @@ class DecisionTree(Module):
         self.name_index = 0
 
         self.tree = Tree()
-        self.tree.create_node('root', 'root', data=Linear(4, 1))
+        self.tree.create_node('root', 'root', data=Linear(5, 1))
         self._build_branch(parent_node='root', branch_depth=self.depth - 1)
-        print('Built tree:')
+        console.log('Built tree:')
         self.tree.show()
 
         for node in self.tree.expand_tree(mode=Tree.DEPTH):
@@ -62,11 +62,11 @@ class DecisionTree(Module):
         if branch_depth == 0:
             return
         left_node_name = self.get_name()
-        self.tree.create_node(left_node_name, left_node_name, parent=parent_node, data=Linear(4, 1))
+        self.tree.create_node(left_node_name, left_node_name, parent=parent_node, data=Linear(5, 1))
         self._build_branch(parent_node=left_node_name, branch_depth=branch_depth - 1)
 
         right_node_name = self.get_name()
-        self.tree.create_node(right_node_name, right_node_name, parent=parent_node, data=Linear(4, 1))
+        self.tree.create_node(right_node_name, right_node_name, parent=parent_node, data=Linear(5, 1))
         self._build_branch(parent_node=right_node_name, branch_depth=branch_depth - 1)
 
     def get_name(self):
@@ -87,12 +87,14 @@ class DecisionTree(Module):
         while True:
             node, module, children = self.get_full_node(name=name)
             if children:
-                z = relu(module(x))
-                name = children[0] if z == 0 else children[1]
+                indicator = clone(x)
+                z = relu(module(indicator))
+                name = children[0] if list(z).count(0) >= len(z) // 2 else children[1]
             else:
                 # Как и в прошлой задачке, не используем softmax
                 # благодаря CrossEntropyLoss
-                x = module(x)
+                x = sigmoid(module(x))
+                return x
 
 
 # Класс датасета
@@ -112,13 +114,13 @@ class ODDataset(Dataset):
         # Выкидываем год, месяц, день и время года, а также номер
         dataset.drop(columns=['id', 'date'], inplace=True)
 
-        print(dataset.shape)
+        console.log(dataset.shape)
 
         # Выкидываем NaN-ы
         dataset.dropna(inplace=True)
 
         # Кажется, готово
-        print(dataset.head())
+        console.log(dataset.head())
 
         self._dataframe = dataset
 
@@ -146,10 +148,9 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
         for batch in train_loader:
             optimizer.zero_grad()
             inputs, targets = batch
-            # print('target:', targets)
 
             # CrossEntropy кушает LongTensor
-            targets = targets.type(LongTensor)
+            targets = targets.unsqueeze(1)
             inputs = inputs.to(device)
             targets = targets.to(device)
             output = model(inputs)
@@ -164,7 +165,7 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
             inputs, targets = batch
             inputs = inputs.to(device)
             output = model(inputs)
-            targets = targets.type(LongTensor)
+            targets = targets.unsqueeze(1)
             targets = targets.to(device)
             loss = loss_fn(output, targets)
             valid_loss += loss.data.item() * inputs.size(0)
@@ -176,7 +177,7 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
 
         save(model.state_dict(), f'weights/{epoch}_ep.pth')
 
-        print(f'Epoch: {epoch}, training Loss: {training_loss:.2f}, validation Loss: {valid_loss:.2f}')
+        console.log(f'Epoch: {epoch}, training Loss: {training_loss:.2f}, validation Loss: {valid_loss:.2f}')
 
 
 if __name__ == '__main__':
@@ -195,9 +196,9 @@ if __name__ == '__main__':
 
     # Выбираем нужную модель и функцию ошибок
     model = DecisionTree(depth=4, names=NAMES)
-    loss_function = CrossEntropyLoss()
+    loss_function = BCELoss()
     # Будем считать на видеокарте
-    torch_device = device('cuda')
+    torch_device = device('cpu')
     model.to(device=torch_device)
 
     # learning rate -- скорость спуска
