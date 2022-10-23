@@ -195,7 +195,7 @@ if __name__ == '__main__':
     validation_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
 
     # Выбираем нужную модель и функцию ошибок
-    model = DecisionTree(depth=4, names=NAMES)
+    model = DecisionTree(depth=2, names=NAMES)
     loss_function = BCELoss()
     # Будем считать на видеокарте
     torch_device = device('cpu')
@@ -206,4 +206,4 @@ if __name__ == '__main__':
     optimizer = Adam(model.parameters(), lr=0.001)
     train(model=model, optimizer=optimizer, loss_fn=loss_function,
           train_loader=train_loader, val_loader=validation_loader,
-          epochs=30, device=torch_device)
+          epochs=300, device=torch_device)
