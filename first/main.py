@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 
 # Константы
-INPUT_DIR = './inputs'
+INPUT_DIR = 'inputs'
 BATCH_SIZE = 16
 
 
@@ -161,10 +161,10 @@ def train(model, optimizer, loss_fn, train_loader, val_loader, epochs=20, device
         valid_loss /= len(val_loader.dataset)
 
         # На всякий случай сохраняем веса
-        if not exists('./weights'):
-            mkdir('./weights')
+        if not exists('weights'):
+            mkdir('weights')
 
-        save(model.state_dict(), f'./weights/{epoch}_ep.pth')
+        save(model.state_dict(), f'weights/{epoch}_ep.pth')
 
         print(f'Epoch: {epoch}, training Loss: {training_loss:.2f}, validation Loss: {valid_loss:.2f}')
 
