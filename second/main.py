@@ -6,12 +6,12 @@ from random import shuffle
 from os.path import join, exists
 
 from pandas import read_csv
-from torch import tensor, save, device, clone, sigmoid
+from torch import tensor, save, device, clone, sigmoid, randn
 
 from torch.optim import Adam
-from torch.nn import BCELoss, Module, Linear
+from torch.nn import BCELoss, Module, Linear, Parameter
 
-from torch.nn.functional import relu, sigmoid
+from torch.nn.functional import relu
 from torch.utils.data import Dataset, DataLoader
 
 # Константы
@@ -33,6 +33,17 @@ NAMES = ['Anton', 'Ivan', 'Boris', 'Marie', 'Rebecca', 'Pola', 'Yohanna', 'Sacha
 # Treasure Island
 NAMES += ['Jim Hawkins', 'Captain Smollett', 'Billy Bones', 'Doctor Livesey',
           'Squire Trelawney', 'Captain Flint', 'Blind Pew', 'Benn Gunn']
+
+
+class Leaf(Linear):
+    def __init__(self, *args, **kwargs):
+        super(Leaf, self).__init__(*args, **kwargs)
+        self.register_parameter('beta', Parameter(randn(1)))
+
+    def forward(self, input):
+        return self.beta * super().forward(input)
+
+
 
 # Модели
 class DecisionTree(Module):
@@ -56,8 +67,7 @@ class DecisionTree(Module):
 
         for node in self.tree.expand_tree(mode=Tree.DEPTH):
             module = self.tree.get_node(node).data
-            for parameter in module.parameters():
-                self.register_parameter(node, parameter)
+            self.register_module(node, module)
 
 
     # Строим дерево рекурсивно
@@ -65,11 +75,11 @@ class DecisionTree(Module):
         if branch_depth == 0:
             return
         left_node_name = self.get_name()
-        self.tree.create_node(left_node_name, left_node_name, parent=parent_node, data=Linear(5, 1))
+        self.tree.create_node(left_node_name, left_node_name, parent=parent_node, data=Linear(5, 1) if branch_depth == 0 else Leaf(5, 1, bias=False))
         self._build_branch(parent_node=left_node_name, branch_depth=branch_depth - 1)
 
         right_node_name = self.get_name()
-        self.tree.create_node(right_node_name, right_node_name, parent=parent_node, data=Linear(5, 1))
+        self.tree.create_node(right_node_name, right_node_name, parent=parent_node, data=Linear(5, 1) if branch_depth == 0 else Leaf(5, 1, bias=False))
         self._build_branch(parent_node=right_node_name, branch_depth=branch_depth - 1)
 
 
